@@ -340,7 +340,7 @@ client:
     name: RealQB
     endpoint: http://127.0.0.1:{QB_WEB_PORT}
     username: admin
-    password: adminadmin
+    password: {QB_PASSWORD}
     api-key: ""
     basic-auth:
       user: ""

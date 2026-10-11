@@ -638,9 +638,8 @@ async fn handle_ban_delete(State(state): State<AppState>, body: Bytes) -> Respon
         .iter()
         .filter_map(|s| pbh_core::ipset::parse_cidr(s))
         .collect();
-    let requested = nets.len();
-    state.engine.unban_addresses(&nets);
-    StdResp::ok(json!({ "count": requested }))
+    let removed = state.engine.unban_addresses(&nets);
+    StdResp::ok(json!({ "count": removed }))
 }
 
 // ---------------------------------------------------------------------------
