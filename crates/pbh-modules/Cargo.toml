@@ -1,0 +1,19 @@
+[package]
+name = "pbh-modules"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reqwest = { workspace = true }
+tokio = { workspace = true }
+parking_lot = { workspace = true }
+pbh-db = { workspace = true }
+pbh-geoip = { workspace = true }
+pbh-downloader = { workspace = true }
+ipnet = { workspace = true }
+pbh-core = { workspace = true }
+pbh-config = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+tracing = { workspace = true }

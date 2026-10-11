@@ -1,0 +1,68 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/pbh-core",
+    "crates/pbh-config",
+    "crates/pbh-db",
+    "crates/pbh-geoip",
+    "crates/pbh-downloader",
+    "crates/pbh-modules",
+    "crates/pbh-engine",
+    "crates/pbh-push",
+    "crates/pbh-web",
+    "crates/pbh-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+repository = "https://github.com/PBH-BTN/PeerBanHelper"
+
+[workspace.dependencies]
+pbh-core = { path = "crates/pbh-core" }
+pbh-config = { path = "crates/pbh-config" }
+pbh-db = { path = "crates/pbh-db" }
+pbh-geoip = { path = "crates/pbh-geoip" }
+pbh-downloader = { path = "crates/pbh-downloader" }
+pbh-modules = { path = "crates/pbh-modules" }
+pbh-engine = { path = "crates/pbh-engine" }
+pbh-push = { path = "crates/pbh-push" }
+pbh-web = { path = "crates/pbh-web" }
+
+anyhow = "1"
+async-trait = "0.1"
+axum = "0.8"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+fancy-regex = "0.14"
+http = "1"
+ipnet = "2"
+parking_lot = "0.12"
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "cookies",
+    "gzip",
+    "http2",
+    "rustls-tls",
+] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+serde_yaml = "0.9"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["fs", "cors", "trace"] }
+tracing = "0.1"
+tracing-appender = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+uuid = { version = "1", features = ["v4"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"

@@ -1,1 +1,0 @@
-ALTER TABLE pcb_range CHANGE COLUMN `range` ip_range VARCHAR(255) NOT NULL;

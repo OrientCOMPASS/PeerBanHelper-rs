@@ -1,0 +1,110 @@
+name: CI
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test-linux:
+    name: Test (ubuntu, real downloaders)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install real downloaders & tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qbittorrent-nox transmission-daemon xz-utils
+          qbittorrent-nox --version || true
+          transmission-daemon --version || true
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build (debug)
+        run: cargo build --locked
+
+      - name: Unit tests
+        run: cargo test --locked
+
+      - name: Prepare GeoIP ASN database (for geoip suite)
+        run: |
+          mkdir -p target/geoip-data/ipdb
+          curl -sSL --retry 3 --retry-delay 5 -o /tmp/asn.xz \
+            https://github.com/PBH-BTN/GeoLite.mmdb/releases/latest/download/GeoLite2-ASN.mmdb.xz
+          xz -dc /tmp/asn.xz > target/geoip-data/ipdb/GeoLite2-ASN.mmdb
+          ls -la target/geoip-data/ipdb/
+
+      - name: Prepare upstream WebUI dist (for static-serving checks)
+        run: |
+          curl -sSL --retry 3 --retry-delay 5 -o /tmp/pbh.zip \
+            https://github.com/PBH-BTN/PeerBanHelper/releases/download/v9.5.1/PeerBanHelper_9.5.1.zip
+          python3 - <<'PY'
+          import zipfile, io, os
+          outer = zipfile.ZipFile('/tmp/pbh.zip')
+          jar = zipfile.ZipFile(io.BytesIO(outer.read('PeerBanHelper/PeerBanHelper.jar')))
+          out = 'webui-dist'
+          os.makedirs(out, exist_ok=True)
+          n_files = 0
+          for n in jar.namelist():
+              if n.startswith('static/') and not n.endswith('/'):
+                  rel = n[len('static/'):]
+                  p = os.path.join(out, rel)
+                  os.makedirs(os.path.dirname(p), exist_ok=True)
+                  open(p, 'wb').write(jar.read(n))
+                  n_files += 1
+          print('webui-dist ready:', n_files, 'files')
+          PY
+
+      - name: Integration suites (fake downloaders)
+        run: |
+          set -e
+          for t in smoke api_test modules_test pcb_test rule_sub_test geoip_test adapters_test batch_a_test; do
+            echo "===== suite: $t ====="
+            python3 tests/$t.py
+          done
+
+      - name: Integration suites (real qbittorrent-nox / transmission-daemon)
+        run: |
+          set -e
+          echo "===== suite: real_qb_test ====="
+          python3 tests/real_qb_test.py
+          echo "===== suite: real_tr_test ====="
+          python3 tests/real_tr_test.py
+
+      - name: Collect logs
+        if: always()
+        run: |
+          mkdir -p ci-logs
+          cp /tmp/pbh-*.log ci-logs/ 2>/dev/null || true
+          cp /tmp/tr-test.log ci-logs/ 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ci-logs
+          path: ci-logs/
+          if-no-files-found: ignore
+
+  build-windows:
+    name: Build check (windows)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build (debug, compile parity check)
+        run: cargo build --locked

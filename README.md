@@ -1,141 +1,127 @@
-# PeerBanHelper
-[English](./README.EN.md)
+# pbh-rs — PeerBanHelper 的 Rust 重写（实验性）
 
-自动封禁不受欢迎、吸血和异常的 BT 客户端，并支持自定义规则。
+[PeerBanHelper](https://github.com/PBH-BTN/PeerBanHelper)（BT 反吸血工具）无头后端的 **Rust 全量重写**。
+设计原则：**不复刻上游内部实现，而是理解其功能与设计后，保持进程外行为一致**，做成可直接替换的
+x86_64 CLI 守护进程：
 
-![page-views](https://raw.githubusercontent.com/PBH-BTN/views-counter/refs/heads/master/svg/754169590/badge.svg)
+- 直接接管上游数据目录（`config.yml` v48 / `profile.yml` v40 / SQLite 库，DDL 逐字一致）
+- Web API 与上游 Gson 序列化形状一致（`StdResp`、epoch 毫秒、`TranslationComponent`、null 省略、
+  `PBHPage` 分页），**上游 Vue WebUI（v9.5.1 dist）零改动接入**
+- 封禁决策、模块顺序、合并语义（SKIP > BAN > BAN_FOR_DISCONNECT > NO_ACTION，同级取更长时长）、
+  日志文案、数据库落库（history/banlist/pcb_*/rule_sub_*/peer_records/tracked_swarm/…）全面对齐
+- 上游历史怪癖按 bug-compat 原则原样保留（如 PID 模块命中时 reason 使用 CNB 键、"Hit-" 前缀、
+  IdleDos 的百分比单位不一致、AutoRangeBan 的 handshaking→pass 等，代码内均有注释标注）
 
-**在安装前试用 PeerBanHelper：**[前往演示站](https://pbh-demo.pbh-btn.com)
+> ⚠️ **非官方项目**。独立实验性衍生作品，GPL-3.0（与上游同许可）。上游 `AGENTS.md` 禁止 AI 生成
+> 代码进入其仓库，本项目不向上游提交代码；本仓库明确允许 AI 生成代码，由人类维护者审查合入。
 
-PeerBanHelper 是一个开放源代码的个人网络防火墙安全软件。通过连接支持的应用程序（如：BitTorrent 客户端软件）的 Web API 接口获取受保护应用的连接信息，识别其中可能包含潜在安全威胁的连接并通知对应的应用程序主动断开其连接。  
+## 实测指标（x86_64 Linux，沙盒环境）
 
-## 功能介绍
+| 指标 | pbh-rs | 上游 Java (v9.5.1) |
+|---|---|---|
+| 分发体积 | **12.3 MB** 单二进制（strip+LTO） | JRE 镜像 300MB+ / 安装包 60~125MB |
+| 常驻内存 | **~17 MB RSS**（含 GeoIP 三库 mmap；无 GeoIP ~12 MB） | 堆软上限 386MB（实际 RSS 常见 300~600MB） |
+| 冷启动 | **~55 ms**（API 就绪） | JVM+Spring+Flyway 5~15 s |
+| BanWave | 无 GC 停顿，5s 周期毫秒级完成 | G1 周期性 GC |
 
-PeerBanHelper 主要由以下几个功能模块组成：
+## 功能状态
 
-- [PeerID 黑名单](https://docs.pbh-btn.com/docs/module/peer-id)
-- [Client Name 黑名单](https://docs.pbh-btn.com/docs/module/client-name)
-- [IP/GeoIP/IP 类型 黑名单](https://docs.pbh-btn.com/docs/module/ip-address-blocker)
-- [虚假进度检查器（提供启发式客户端检测功能）](https://docs.pbh-btn.com/docs/module/progress-cheat-blocker)
-- [自动连锁封禁](https://docs.pbh-btn.com/docs/module/auto-range-ban)
-- [多拨追猎](https://docs.pbh-btn.com/docs/module/multi-dial)
-- Peer ID/Client Name 伪装检查；通过 [AviatorScript 引擎](https://docs.pbh-btn.com/docs/module/expression-engine) 实现
-- [主动监测（提供本地数据分析功能）](https://docs.pbh-btn.com/docs/module/active-monitoring)
-- [网络 IP 集规则订阅](https://docs.pbh-btn.com/docs/module/ip-address-blocker-rules)
-- WebUI （目前支持：活跃封禁名单查看，历史封禁查询，封禁最频繁的 Top 50 IP，规则订阅管理，图表查看，Peer 列表查看）
+### ✅ 已实现并通过测试
 
-此外，PeerBanHelper 会在启动时下载 GeoIP 库，成功加载后支持以下功能：
+| 领域 | 内容 |
+|---|---|
+| 引擎 | BanWave 调度（check-interval）、过期解封、手动封禁/解封（含上游 scheduleBanPeerNoAssign 全部细节：100 年时长、`-USROPS-` mock peer、Lombok toString 参数）、needReApply 全量重应用、全局暂停、封禁表持久化（1h+关闭+变更节流）、崩溃安全（WAL） |
+| 规则模块 | PeerID 黑名单、ClientName 黑名单、IP/端口黑名单（含 GeoIP ASN/地区/城市/网络类型）、**PCB 假进度检测**（fastPcbTest/过量下载/进度差异延迟窗口/进度回退，pcb_address+pcb_range 双实体、缓慢失忆攻击缓解）、多拨追猎（含 keep-hunting）、AutoRangeBan 连锁封禁（/30、/48）、空闲连接 DoS 保护（三种保护模式）、AntiVampire 迅雷预设、**IP 集规则订阅**（远程拉取/本地缓存回退/注释合并解析/二分区间匹配/定时刷新/rule_sub_info+log 落库） |
+| 下载器 | **qBittorrent/qBEE**（真机 4.5.2 验证）、**Transmission**（真机 3.00 验证，目标 4.1+）、**BiglyBT**（协议级 fake 验证）、**Aria2Next**（协议级 fake 验证）；统一特性旗标、限速/端口透传、增量+全量封禁、banlist-remapping |
+| 封禁通道 | qB `banned_IPs`/`banPeers`、Transmission blocklist-url 三格式端点（/blocklist/ip、p2p-plain-format 含 zlib 头规避与 UA workaround、dat-emule）、BiglyBT POST/PUT /bans、aria2 setBtPeerBlocklist |
+| Web API | WebUI 引用的 **61 个端点**全覆盖：认证（Bearer/?token/Cookie、403/401/303-NeedInit）、OOBE 全流程、下载器 CRUD+测试+状态、bans(GET/POST/DELETE)+logs+ranks、配置 JSON 视图读写（**保留注释**的 YAML round-trip、键 `-`↔`_`、规则串↔对象列表、push-notification 字典↔列表）、热重载、全局暂停、日志（history+SSE live）、统计（counter/banTrends/date/field 含 SUBSTR(8) peerId 语义）、torrent/peer 查询、alerts、模块视图、订阅管理、推送 CRUD+测试 |
+| GeoIP | GeoLite2-City/ASN + GeoCN（上游公开镜像、xz 解压、独立线程下载防饿死 async runtime、行政区划 CSV 前缀查找、CN/TW/HK/MO 覆盖合并、1h 缓存、auto-update）、history.peer_geoip 快照、BanDTO.ipGeoData、IPBlackList 全维度规则 |
+| 监视 | PeerRecording（peer_records + accessHistory API）、SwarmTracking（tracked_swarm + counter）、ActiveMonitoring（traffic_journal_v3 60s 桶）、数据保留清理 |
+| 推送/告警 | 9 种 Provider（Telegram/Webhook/Bark/Gotify/ntfy/PushDeer/PushPlus/ServerChan/SMTP）、alert 表 + 未读去重 + API |
+| i18n | 上游 messages.yml 三语言全量内嵌（~580 键），Accept-Language 协商，服务端烘焙 + WebUI 键值透传 |
+| 平台 | SIGTERM/SIGINT 优雅停机（Docker stop 语义）、滚动日志文件、`doctor` 诊断子命令 |
 
-- 在封禁列表中查看 IP 归属地，AS 信息（ASN、ISP、AS 名称等），网络类型信息（宽带、基站、物联网、数据中心等）
-- 基于 GeoIP 信息按国家/地区、城市、网络类型、ASN 等封禁 IP 地址
-- 查看 GeoIP 统计数据
+### ⛔ 按决策禁用 / 未实现（明确记录）
 
-> [!TIP]
-> 为获得最佳效果，建议配合我们维护的 IP 规则库 [PBH-BTN/BTN-Collected-Rules](https://github.com/PBH-BTN/BTN-Collected-Rules) 和 [BTN 网络](https://docs.pbh-btn.com/docs/btn/intro) 一起食用，不过这是完全可选的。
+| 项 | 状态 |
+|---|---|
+| BTN 网络 | 按项目决策禁用（含脚本下发）；`/api/modules/btn` 返回 disabled |
+| 插件系统 (PF4J) | 按项目决策砍掉；`/api/plugins` 返回空列表 |
+| AviatorScript 表达式规则 | 随 BTN 脚本决策禁用；启用时记录警告 |
+| PBH Plus | 不提供（图表端点按上游未激活许可行为返回 402；status 返回 not activated） |
+| Deluge / BitComet 适配器 | 未实现（Deluge 依赖 PBH-Adapter-Deluge 插件协议、BitComet 需 AES 握手且仅 Windows；配置中出现时记录明确警告并跳过） |
+| AutoSTUN / NAT 检测 / UPnP | 未实现（上游默认关闭；端点返回 enabled=false） |
+| PTR 黑名单 | 上游本身已注释停用（registerModules 中被注释），保持一致 |
+| MySQL/PostgreSQL、H2 | 仅 SQLite（覆盖无头场景主流用法） |
+| 桌面 GUI (Swing/SWT) | 不在范围内（WebUI 替代） |
+| umami 遥测 / Sentry | 不移植（衍生项目不向上游回传数据） |
 
+## 快速开始
 
-## 支持的客户端
+```bash
+cargo build --release                      # 需 Rust ≥1.85 与 C 工具链（sqlite bundled 编译）
 
-> [!CAUTION]
-> 所有安装在 Docker 中的下载器，必须使用 host 网络驱动程序。PBH 需要下载器能获得 Peer 的真实 IP，不能使用 bridge 桥接模式！
+./target/release/pbh doctor --data-dir ./data   # 初始化数据目录并诊断
+# 浏览器打开 http://127.0.0.1:9898/init 走 OOBE 向导（设置 token + 添加下载器）
+./target/release/pbh run --data-dir ./data
 
-- qBittorrent/qBitorrent，**4.5.0 或更高版本**，不支持 XDown
-- BiglyBT（需要安装[插件](https://github.com/PBH-BTN/PBH-Adapter-BiglyBT)）
-- Deluge（需要安装[插件](https://github.com/PBH-BTN/PBH-Adapter-Deluge)）
-- Transmission **(4.1.0-beta2 或更高版本)**
-- BitComet **v2.18 或更高版本** (不支持 P2SP LTSeed 长效种子反吸血，因为 BitComet 暂时无法封禁长效连接)
+# WebUI：将上游 webui dist（或官方发行包 jar 内 static/）放入 <data>/static/
+```
 
-PeerBanHelper 仅支持对传统 IPv4 或 IPv6 地址的反吸血，如遇 I2P 或者 Tor 连接将主动忽略。
+数据目录与上游完全同构：`config/{config.yml,profile.yml}`、`db/peerbanhelper.db`、`logs/`、
+`static/`、`ipdb/`、`sub/`。**从 Java 版迁移**：停旧进程 → 备份数据目录 → 用 pbh-rs 指向同一
+目录即可（banlist/history/PCB 记录直接可读；建议单向迁移，回退前先恢复备份）。
 
-# 截图
+## 测试
 
-| 主界面                                                                                                                                | 封禁列表                                                                                                                             | 封禁日志                                                                                                                             | 封禁统计                                                                                                                            | 规则统计                                                                                                                                | 规则订阅                                                                                                                                |
-| ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| <img width="1280" alt="homepage" src="https://github.com/PBH-BTN/PeerBanHelper/assets/19235246/d7f7ea9f-70df-40f1-a782-260450972bc9"> | <img width="1280" alt="banlist" src="https://github.com/PBH-BTN/PeerBanHelper/assets/19235246/c3e139e6-eb82-423f-b083-1839713ec801"> | <img width="1280" alt="banlogs" src="https://github.com/PBH-BTN/PeerBanHelper/assets/19235246/00d8efcc-0dd7-4e05-bdeb-9444e14739d6"> | <img width="1280" alt="maxban" src="https://github.com/PBH-BTN/PeerBanHelper/assets/30802565/ae78ebb9-67f7-481a-9afc-7ced2c6a2534"> | <img width="1280" alt="banMetrics" src="https://github.com/PBH-BTN/PeerBanHelper/assets/19235246/9e4cd7b7-aaff-4b66-8d1d-ad4ef3466b1f"> | <img width="1280" alt="banMetrics" src="https://github.com/PBH-BTN/PeerBanHelper/assets/19235246/dc312186-9643-4f23-9d53-7b8e0852f228"> |
+```bash
+cargo test                                  # 规则引擎/YAML 编辑器/GeoIP 单元测试
+python3 tests/smoke.py                      # 基础闭环（假 qB，26 项）
+python3 tests/api_test.py                   # OOBE/CRUD/配置写回/热重载（33 项）
+python3 tests/pcb_test.py                   # PCB 四场景（12 项）
+python3 tests/modules_test.py               # 多拨/连锁/反吸血（10 项）
+python3 tests/rule_sub_test.py              # 规则订阅全链路（13 项）
+python3 tests/geoip_test.py                 # ASN 规则+真实 mmdb（5 项）
+python3 tests/adapters_test.py              # BiglyBT/Aria2Next 协议（12 项）
+python3 tests/batch_a_test.py               # WebUI API 面+监视+推送+SSE（36 项）
+python3 tests/real_qb_test.py               # ★ 真机 qbittorrent-nox 4.5.2 三阶段（19 项）
+python3 tests/real_tr_test.py               # ★ 真机 transmission-daemon 3.00 全链路（9 项）
+PBH_BIN=target/release/pbh python3 tests/...  # 以 release 二进制跑任意套件
+```
 
-## 安装 PeerBanHelper
+真机测试自管理下载器实例（独立 HOME/端口），使用原始 BitTorrent 协议假 Peer
+（真实握手 + 分块请求）驱动封禁判定，并验证下载器侧实际生效（连接被断开/拒绝、
+blocklist 收敛、解封后恢复）。
 
-查看 [PeerBanHelper 文档](https://docs.pbh-btn.com/docs/category/%E5%AE%89%E8%A3%85%E9%83%A8%E7%BD%B2)
+## 架构
 
-## 常见问题
+```
+crates/
+├── pbh-core        # 领域模型（Gson 兼容 serde）、规则引擎、CIDR、BanList、i18n
+├── pbh-config      # 数据目录、点分路径 YAML 读取、注释保留 round-trip 编辑器、JSON 视图转换、热重载句柄
+├── pbh-db          # rusqlite：上游 DDL 逐字一致的全部表 + 查询/批量写
+├── pbh-geoip       # mmdb 读取、镜像下载(xz)、GeoCN 行政区划、netType 映射
+├── pbh-downloader  # Downloader trait + qBittorrent/Transmission/BiglyBT/Aria2Next + banlist 重映射
+├── pbh-modules     # 9 个规则模块（上游 registerModules 顺序）+ PCB 双实体存储 + 订阅匹配器
+├── pbh-push        # 9 种推送 Provider（含 lettre SMTP）
+├── pbh-engine      # BanWave 循环、封禁落地/解封/持久化、监视数据收集与刷写、告警
+├── pbh-web         # axum：61 端点、认证中间件、SSE、静态 WebUI+SPA 回退
+└── pbh-cli         # pbh 二进制：run/doctor/version、tracing（stdout+滚动文件+LogHub 层）
+```
 
-在报告问题前，请先检查 [常见问题列表](https://docs.pbh-btn.com/docs/faq)
+并发模型：上游 BanOrgan 七级流水线以 tokio 任务 + 有界 channel 语义等价实现（单调度者
+BanWave + 每下载器顺序 torrent 迭代 + 模块同步判定）；GeoIP 下载/xz 解压在独立 OS 线程，
+避免 CPU 密集操作饿死 async worker。
 
-## 需要帮助？
-考虑加入我们的 QQ 群！
+## 部署
 
-1 群：932978658
+- `deploy/Dockerfile`：多阶段构建 → scratch 运行镜像（~15MB）
+- `deploy/pbh.service`：systemd 单元
+- Windows：`pbh.exe run` 可直接注册为服务（sc create / NSSM），SIGTERM 语义对应服务停止
 
-或者：[Telegram](https://t.me/+TfjwEmsUKhZjMTI1)
+## 许可与致谢
 
-## 声明
-
-**使用本软件意味着你同意以下声明：** 
-
-违法网站和黑灰产请勿向我组织开发或支持人员发起任何形式的人工服务请求；严禁使用 PBH-BTN 团队的任何成果（包括但不限于代码，镜像，程序，BTN规则集等）从事任何违法违规、危害国家安全、实施或帮助他人实施电信犯罪等非法活动。  
-用户不得通过 PBH-BTN 团队的任何成果（包括但不限于代码，镜像，程序，BTN规则集等）进行任何损害其它个人或组织的利益的活动。在任何违反个人或组织权益的情况下使用 PBH-BTN 团队的任何服务、产品均不被允许。
-用户使用本软件造成的任何后果，由用户自行承担，与本软件开发者无关。
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=PBH-BTN/PeerBanHelper&type=Date)](https://star-history.com/#PBH-BTN/PeerBanHelper&Date)
-
-## Tools
-
-在 PeerBanHelper 的开发过程中，我们使用到了许多优秀的专业工具。感谢下面的公司或项目慷慨的提供开源许可证：
-
-### Install4j
-
-PeerBanHelper 使用 [Install4j multi-platform installer builder](https://www.ej-technologies.com/products/install4j/overview.html) 打包多平台安装程序。感谢 ej-technolgies 的开放源代码许可证。点击链接或者下面的图片下载 install4j。
-
-[![Install4j](https://www.ej-technologies.com/images/product_banners/install4j_large.png)](https://www.ej-technologies.com/products/install4j/overview.html)
-
-### JProfiler
-
-PeerBanHelper 使用 [JProfiler all-in one Java profiler](https://www.ej-technologies.com/jprofiler) 对程序进行性能分析与优化。感谢 ej-technolgies 的开放源代码许可证。点击链接或者下面的图片下载 JProfiler。
-
-[![JProfiler](https://www.ej-technologies.com/images/product_banners/jprofiler_large.png)](https://www.ej-technologies.com/jprofiler)
-
-### 纯真 CZ88.NET 社区版 IP 库
-
-纯真(CZ88.NET)自2005年起一直为广大社区用户提供社区版IP地址库，只要获得纯真的授权就能免费使用，并不断获取后续更新的版本。如果有需要免费版IP库的朋友可以前往纯真的官网进行申请。
-
-纯真除了免费的社区版IP库外，还提供数据更加准确、服务更加周全的商业版IP地址查询数据。纯真围绕IP地址，基于 网络空间拓扑测绘 + 移动位置大数据 方案，对IP地址定位、IP网络风险、IP使用场景、IP网络类型、秒拨侦测、VPN侦测、代理侦测、爬虫侦测、真人度等均有近20年丰富的数据沉淀。
-
-
-## Credit
-
-### Backend
-
-- [Cordelia](https://github.com/bochkov/cordelia)
-- [IPAddress](https://github.com/seancfoley/IPAddress)
-- [YamlConfiguration](https://github.com/bspfsystems/YamlConfiguration)
-- [libby](https://github.com/AlessioDP/libby)
-- [AviatorScript](https://github.com/killme2008/aviatorscript)
-- [javalin](https://javalin.io/)
-- [deluge-java](https://github.com/RangerRick/deluge-java)
-- [SystemThemeDetector](https://github.com/Benzor94/SystemThemeDetector)
-- [Methanol](https://github.com/mizosoft/methanol)
-- [Flatlaf](https://github.com/JFormDesigner/FlatLaf)
-- [GeoIP2](https://dev.maxmind.com/geoip)
-- [ormlite](https://ormlite.com/)
-- [SimpleReloadLib](https://github.com/Ghost-chu/SimpleReloadLib)
-- [portmapper](https://github.com/offbynull/portmapper)
-- [xz](https://github.com/tukaani-project/xz-java)
-- [commonmark](https://github.com/commonmark/commonmark-java)
-- [oshi](https://github.com/oshi/oshi)
-- [semver4j](https://github.com/vdurmont/semver4j)
-- [commonmark](https://github.com/commonmark/commonmark-java)
-- [dnsjava](https://github.com/dnsjava/dnsjava)
-- [SWT](https://eclipse.dev/eclipse/swt/)
-- [simple-java-mail](https://www.simplejavamail.org/)
-- [PF4J](https://pf4j.org/)
-- [completable-futures](https://github.com/spotify/completable-futures)
-- [cdnbye/NatTypeDetector](https://github.com/cdnbye/NatTypeDetector)
-
-### WebUI
-
-- [Vue](https://vuejs.org/)
-- [ArcoDesign](https://arco.design/)
-- [ECharts](https://echarts.apache.org/en/index.html)
-
+GPL-3.0。行为规格、配置模板、多语言文件、表结构、行政区划数据派生自
+[PBH-BTN/PeerBanHelper](https://github.com/PBH-BTN/PeerBanHelper) v9.5.1（GPL-3.0，
+Copyright PBH-BTN 团队及贡献者）。GeoLite2/GeoCN 数据来自 MaxMind 及 PBH-BTN 公开镜像。
+本项目与上游组织无隶属关系；「PeerBanHelper」名称与商标权利归上游所有。

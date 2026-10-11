@@ -1,0 +1,23 @@
+[Unit]
+Description=pbh-rs (PeerBanHelper-compatible BT peer blocking daemon, Rust rewrite)
+Documentation=https://github.com/PBH-BTN/PeerBanHelper
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/pbh run --data-dir /var/lib/pbh
+Restart=on-failure
+RestartSec=5
+# 资源限制（可按需调整）
+MemoryHigh=256M
+MemoryMax=512M
+# 安全加固
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/pbh
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

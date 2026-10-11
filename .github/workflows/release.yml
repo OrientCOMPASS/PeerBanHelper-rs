@@ -1,0 +1,137 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-linux-musl:
+    name: Build x86_64-unknown-linux-musl (static)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install musl tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: musl
+      - name: Build
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+        run: cargo build --release --locked --target x86_64-unknown-linux-musl --bin pbh
+      - name: Package
+        run: |
+          cp target/x86_64-unknown-linux-musl/release/pbh pbh-linux-x86_64-musl
+          chmod +x pbh-linux-x86_64-musl
+          ./pbh-linux-x86_64-musl version || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-linux
+          path: pbh-linux-x86_64-musl
+
+  build-windows:
+    name: Build x86_64-pc-windows-msvc
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release --locked --bin pbh
+      - name: Package
+        shell: bash
+        run: cp target/release/pbh.exe pbh-windows-x86_64.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-windows
+          path: pbh-windows-x86_64.exe
+
+  release:
+    name: Publish GitHub Release
+    needs: [build-linux-musl, build-windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+
+      - name: Fetch upstream WebUI dist (v9.5.1) and package
+        run: |
+          curl -sSL --retry 3 --retry-delay 5 -o /tmp/pbh.zip \
+            https://github.com/PBH-BTN/PeerBanHelper/releases/download/v9.5.1/PeerBanHelper_9.5.1.zip
+          python3 - <<'PY'
+          import zipfile, io, os
+          outer = zipfile.ZipFile('/tmp/pbh.zip')
+          jar = zipfile.ZipFile(io.BytesIO(outer.read('PeerBanHelper/PeerBanHelper.jar')))
+          out = 'webui-dist'
+          os.makedirs(out, exist_ok=True)
+          n = 0
+          for name in jar.namelist():
+              if name.startswith('static/') and not name.endswith('/'):
+                  rel = name[len('static/'):]
+                  p = os.path.join(out, rel)
+                  os.makedirs(os.path.dirname(p), exist_ok=True)
+                  open(p, 'wb').write(jar.read(name))
+                  n += 1
+          print('webui files:', n)
+          PY
+          cp LICENSE webui-dist/LICENSE
+          (cd webui-dist && zip -qr ../pbh-webui-v9.5.1.zip .)
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum pbh-linux-x86_64-musl pbh-windows-x86_64.exe > SHA256SUMS.txt
+          sha256sum ../pbh-webui-v9.5.1.zip >> SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: pbh-rs ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: false
+          body: |
+            ## pbh-rs — PeerBanHelper 后端的 Rust 重写（实验性）
+
+            行为兼容目标：**PeerBanHelper v9.5.1**（无头 CLI/服务器形态）。
+
+            ### 资产说明
+            | 文件 | 说明 |
+            |---|---|
+            | `pbh-linux-x86_64-musl` | Linux x86_64 静态二进制（musl，无外部依赖，NAS/Docker/裸机通用） |
+            | `pbh-windows-x86_64.exe` | Windows x86_64 可执行文件 |
+            | `pbh-webui-v9.5.1.zip` | 上游官方 WebUI 静态资源（解压到数据目录 `static/`） |
+            | `SHA256SUMS.txt` | 校验和 |
+
+            ### 快速开始
+            ```bash
+            chmod +x pbh-linux-x86_64-musl
+            ./pbh-linux-x86_64-musl doctor --data-dir ./data   # 初始化数据目录
+            ./pbh-linux-x86_64-musl run --data-dir ./data      # 启动，浏览器打开 http://127.0.0.1:9898 走 OOBE
+            ```
+            WebUI：解压 `pbh-webui-v9.5.1.zip` 到 `<data>/static/`。
+
+            详见仓库 README.md 与 docs/compatibility.md（兼容性矩阵与已知差异）。
+            GPL-3.0 · 非官方衍生项目。
+          files: |
+            dist/pbh-linux-x86_64-musl
+            dist/pbh-windows-x86_64.exe
+            dist/SHA256SUMS.txt
+            pbh-webui-v9.5.1.zip

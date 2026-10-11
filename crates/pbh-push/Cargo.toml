@@ -1,0 +1,21 @@
+[package]
+name = "pbh-push"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pbh-core = { workspace = true }
+pbh-config = { workspace = true }
+anyhow = { workspace = true }
+lettre = { version = "0.11", default-features = false, features = [
+    "builder",
+    "smtp-transport",
+    "tokio1-rustls-tls",
+] }
+parking_lot = { workspace = true }
+reqwest = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

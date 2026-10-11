@@ -1,0 +1,27 @@
+[package]
+name = "pbh-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pbh"
+path = "src/main.rs"
+
+[dependencies]
+parking_lot = { workspace = true }
+pbh-core = { workspace = true }
+pbh-config = { workspace = true }
+pbh-db = { workspace = true }
+pbh-geoip = { workspace = true }
+pbh-downloader = { workspace = true }
+pbh-modules = { workspace = true }
+pbh-engine = { workspace = true }
+pbh-push = { workspace = true }
+pbh-web = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-appender = { workspace = true }
+tracing-subscriber = { workspace = true }
