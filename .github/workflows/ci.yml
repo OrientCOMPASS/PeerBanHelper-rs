@@ -5,6 +5,7 @@ on:
     branches: [dev, main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -88,23 +89,97 @@ jobs:
         if: always()
         run: |
           mkdir -p ci-logs
-          cp /tmp/pbh-*.log ci-logs/ 2>/dev/null || true
-          cp /tmp/tr-test.log ci-logs/ 2>/dev/null || true
+          python3 - <<'PY'
+          import glob, os, shutil, tempfile
+          for f in glob.glob(os.path.join(tempfile.gettempdir(), 'pbh-*.log')):
+              shutil.copy(f, 'ci-logs')
+          shutil.copy('/tmp/tr-test.log', 'ci-logs') if os.path.exists('/tmp/tr-test.log') else None
+          print('collected:', os.listdir('ci-logs'))
+          PY
 
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: ci-logs
+          name: ci-logs-linux
           path: ci-logs/
           if-no-files-found: ignore
 
-  build-windows:
-    name: Build check (windows)
+  test-windows:
+    name: Test (windows, fake downloaders)
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+
       - uses: dtolnay/rust-toolchain@stable
+
       - uses: Swatinem/rust-cache@v2
-      - name: Build (debug, compile parity check)
+
+      - name: Build (debug)
         run: cargo build --locked
+
+      - name: Unit tests
+        run: cargo test --locked
+
+      - name: Prepare GeoIP ASN database (for geoip suite)
+        shell: bash
+        run: |
+          python - <<'PY'
+          import lzma, os, urllib.request
+          os.makedirs('target/geoip-data/ipdb', exist_ok=True)
+          url = 'https://github.com/PBH-BTN/GeoLite.mmdb/releases/latest/download/GeoLite2-ASN.mmdb.xz'
+          data = urllib.request.urlopen(url, timeout=180).read()
+          out = 'target/geoip-data/ipdb/GeoLite2-ASN.mmdb'
+          open(out, 'wb').write(lzma.decompress(data))
+          print('mmdb ready', os.path.getsize(out))
+          PY
+
+      - name: Prepare upstream WebUI dist (for static-serving checks)
+        shell: bash
+        run: |
+          python - <<'PY'
+          import io, os, urllib.request, zipfile
+          url = 'https://github.com/PBH-BTN/PeerBanHelper/releases/download/v9.5.1/PeerBanHelper_9.5.1.zip'
+          outer = zipfile.ZipFile(io.BytesIO(urllib.request.urlopen(url, timeout=300).read()))
+          jar = zipfile.ZipFile(io.BytesIO(outer.read('PeerBanHelper/PeerBanHelper.jar')))
+          out = 'webui-dist'
+          os.makedirs(out, exist_ok=True)
+          n_files = 0
+          for n in jar.namelist():
+              if n.startswith('static/') and not n.endswith('/'):
+                  p = os.path.join(out, n[len('static/'):])
+                  os.makedirs(os.path.dirname(p), exist_ok=True)
+                  open(p, 'wb').write(jar.read(n))
+                  n_files += 1
+          print('webui-dist ready:', n_files, 'files')
+          PY
+
+      - name: Integration suites (fake downloaders)
+        shell: bash
+        env:
+          PBH_BIN: ${{ github.workspace }}/target/debug/pbh.exe
+        run: |
+          set -e
+          for t in smoke api_test modules_test pcb_test rule_sub_test geoip_test adapters_test batch_a_test; do
+            echo "===== suite: $t ====="
+            python tests/$t.py
+          done
+
+      - name: Collect logs
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p ci-logs
+          python - <<'PY'
+          import glob, os, shutil, tempfile
+          for f in glob.glob(os.path.join(tempfile.gettempdir(), 'pbh-*.log')):
+              shutil.copy(f, 'ci-logs')
+          print('collected:', os.listdir('ci-logs'))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: ci-logs-windows
+          path: ci-logs/
+          if-no-files-found: ignore

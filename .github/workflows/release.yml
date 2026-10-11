@@ -12,8 +12,13 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  ci:
+    name: Full CI gate (ubuntu real-downloaders + windows suites)
+    uses: ./.github/workflows/ci.yml
+
   build-linux-musl:
     name: Build x86_64-unknown-linux-musl (static)
+    needs: ci
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -34,7 +39,16 @@ jobs:
         run: |
           cp target/x86_64-unknown-linux-musl/release/pbh pbh-linux-x86_64-musl
           chmod +x pbh-linux-x86_64-musl
-          ./pbh-linux-x86_64-musl version || true
+          ./pbh-linux-x86_64-musl version
+
+      - name: Artifact self-test (release binary on target platform)
+        env:
+          PBH_BIN: ${{ github.workspace }}/pbh-linux-x86_64-musl
+        run: |
+          set -e
+          ./pbh-linux-x86_64-musl doctor --data-dir /tmp/pbh-relcheck
+          python3 tests/smoke.py
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist-linux
@@ -42,6 +56,7 @@ jobs:
 
   build-windows:
     name: Build x86_64-pc-windows-msvc
+    needs: ci
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -53,6 +68,16 @@ jobs:
       - name: Package
         shell: bash
         run: cp target/release/pbh.exe pbh-windows-x86_64.exe
+
+      - name: Artifact self-test (release binary on target platform)
+        shell: bash
+        env:
+          PBH_BIN: ${{ github.workspace }}/pbh-windows-x86_64.exe
+        run: |
+          set -e
+          ./pbh-windows-x86_64.exe version
+          python tests/smoke.py
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist-windows
