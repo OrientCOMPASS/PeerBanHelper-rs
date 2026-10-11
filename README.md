@@ -89,6 +89,9 @@ python3 tests/real_tr_test.py               # ★ 真机 transmission-daemon 3.0
 PBH_BIN=target/release/pbh python3 tests/...  # 以 release 二进制跑任意套件
 ```
 
+Windows 本地跑测试：先 `set PYTHONUTF8=1`（Python 默认 cp1252 编码无法解码
+UTF-8 配置/日志；CI 已内置该环境变量）。
+
 CI（`.github/workflows/ci.yml`，可复用）在**两个目标平台**执行：ubuntu-24.04 上跑
 单元测试 + 全部 8 套 fake-downloader 套件 + 真机 qbittorrent-nox/transmission-daemon
 两套 e2e；windows-latest 上跑单元测试 + 同 8 套 fake-downloader 套件。

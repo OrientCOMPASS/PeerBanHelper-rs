@@ -14,6 +14,8 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # 测试脚本读写 UTF-8 配置/日志；Windows runner 默认 cp1252 会解码失败
+  PYTHONUTF8: 1
 
 jobs:
   test-linux:

@@ -10,6 +10,8 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # 测试脚本读写 UTF-8 配置/日志；Windows runner 默认 cp1252 会解码失败
+  PYTHONUTF8: 1
 
 jobs:
   ci:
@@ -83,9 +85,73 @@ jobs:
           name: dist-windows
           path: pbh-windows-x86_64.exe
 
+  docker-image:
+    name: Docker image (scratch + musl static) build & smoke
+    needs: ci
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare webui-dist (upstream v9.5.1)
+        run: |
+          curl -sSL --retry 3 --retry-delay 5 -o /tmp/pbh.zip \
+            https://github.com/PBH-BTN/PeerBanHelper/releases/download/v9.5.1/PeerBanHelper_9.5.1.zip
+          python3 - <<'PY'
+          import zipfile, io, os
+          outer = zipfile.ZipFile('/tmp/pbh.zip')
+          jar = zipfile.ZipFile(io.BytesIO(outer.read('PeerBanHelper/PeerBanHelper.jar')))
+          out = 'webui-dist'
+          os.makedirs(out, exist_ok=True)
+          n = 0
+          for name in jar.namelist():
+              if name.startswith('static/') and not name.endswith('/'):
+                  rel = name[len('static/'):]
+                  p = os.path.join(out, rel)
+                  os.makedirs(os.path.dirname(p), exist_ok=True)
+                  open(p, 'wb').write(jar.read(name))
+                  n += 1
+          print('webui files:', n)
+          PY
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image (deploy/Dockerfile)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          load: true
+          tags: pbh-rs:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Container smoke test (scratch runtime)
+        run: |
+          set -e
+          docker image ls pbh-rs:ci
+          docker run --rm --entrypoint /pbh pbh-rs:ci version
+          docker run -d --name pbh-ci -p 19898:9898 pbh-rs:ci
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:19898/api/metadata/manifest; then echo; break; fi
+            [ "$i" = 60 ] && { echo "API never came up"; docker logs pbh-ci; exit 1; }
+            sleep 1
+          done
+          # WebUI 静态资源由镜像内 /webui 提供（SPA 回退应给到 index.html）
+          curl -sfL http://127.0.0.1:19898/ | grep -q "<title>PeerBanHelper</title>"
+          curl -sfL -o /dev/null -w 'GET /index.html -> %{http_code}\n' http://127.0.0.1:19898/index.html
+          # SIGTERM 优雅停机（docker stop 默认 10s 宽限）
+          time docker stop pbh-ci
+          docker logs pbh-ci 2>&1 | tail -5
+          docker logs pbh-ci 2>&1 | grep -q "Shutdown signal (SIGTERM) received"
+          docker rm pbh-ci >/dev/null
+
+      - name: Show image size
+        run: docker image inspect pbh-rs:ci --format '{{.Size}} bytes'
+
   release:
     name: Publish GitHub Release
-    needs: [build-linux-musl, build-windows]
+    needs: [build-linux-musl, build-windows, docker-image]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
