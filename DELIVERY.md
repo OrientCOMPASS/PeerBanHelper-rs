@@ -20,8 +20,13 @@
 ## 2. CI 验证状态
 
 - 工作流：`.github/workflows/ci.yml`（push/PR 触发）、`release.yml`（tag `v*` 触发）
-- CI 内容：cargo build + 单元测试 → 8 套 fake-downloader 集成测试 → **真机 qbittorrent-nox
-  （ubuntu-24.04 仓库版 ≥4.5）与真机 transmission-daemon 两套 e2e** → Windows 编译 parity 检查
+- CI 内容：cargo build + 单元测试（16 passing）→ 8 套 fake-downloader 集成测试 →
+  **真机 qbittorrent-nox 4.6.2 与真机 transmission-daemon 4.0.5 两套 e2e**（GitHub
+  ubuntu-24.04 runner，raw BT 协议假 Peer 驱动）→ Windows 编译 parity 检查
+- **首次全绿**：run [#38129052232](https://github.com/OrientCOMPASS/PeerBanHelper-rs/actions/runs/38129052232)
+  @ `5992076`（2026-10-11）——两 job 全部 success，无任何 FAIL 断言
+- CI 期间修复：qB ≥4.6.1 首启临时密码兼容（测试侧）；`DELETE /api/bans` 的 count
+  改为实际移除数（产品侧，对齐上游语义）
 - Release 内容：musl 静态 Linux 二进制 + Windows 二进制 + 上游 WebUI 提取打包 + SHA256 + 发布说明
 
 ## 3. 装机测试清单（实机验收）
