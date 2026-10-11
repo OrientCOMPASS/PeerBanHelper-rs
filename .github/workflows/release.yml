@@ -97,9 +97,9 @@ jobs:
 
       - name: Checksums
         run: |
+          mv pbh-webui-v9.5.1.zip dist/
           cd dist
-          sha256sum pbh-linux-x86_64-musl pbh-windows-x86_64.exe > SHA256SUMS.txt
-          sha256sum ../pbh-webui-v9.5.1.zip >> SHA256SUMS.txt
+          sha256sum pbh-linux-x86_64-musl pbh-windows-x86_64.exe pbh-webui-v9.5.1.zip > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Create Release

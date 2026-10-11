@@ -6,6 +6,8 @@
 
 ## 1. 交付物清单
 
+**Release 页面**: https://github.com/OrientCOMPASS/PeerBanHelper-rs/releases/tag/v0.1.0
+
 | 交付物 | 位置 | 说明 |
 |---|---|---|
 | Linux x86_64 静态二进制 | Release `pbh-linux-x86_64-musl` | musl 静态链接，无外部依赖；NAS/软路由/Docker/裸机通用 |
@@ -28,6 +30,12 @@
 - CI 期间修复：qB ≥4.6.1 首启临时密码兼容（测试侧）；`DELETE /api/bans` 的 count
   改为实际移除数（产品侧，对齐上游语义）
 - Release 内容：musl 静态 Linux 二进制 + Windows 二进制 + 上游 WebUI 提取打包 + SHA256 + 发布说明
+- **发布资产已在沙盒实机复核**：SHA256 全匹配；musl 二进制完成 15 项装机冒烟
+  （冷启动 0.25s 就绪 / WebUI index 服务 / token 鉴权正反向 / status·manifest·bans·
+  downloaders 端点 / 未知路由返回上游同款 405+WEBAPI_ROUTE_NOT_EXISTS / SIGTERM 优雅
+  停机 Goodbye+退出码 0 / 重启恢复+token 持久）；WebUI zip 232 条目含 index.html+LICENSE
+- 注意（上游 quirk，bug-compat 保留）：未知 `/api/*` 路由返回 **405**（上游
+  `EndpointNotFound→METHOD_NOT_ALLOWED`），并非 404
 
 ## 3. 装机测试清单（实机验收）
 

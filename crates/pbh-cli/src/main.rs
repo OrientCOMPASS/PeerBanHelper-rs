@@ -218,8 +218,8 @@ async fn run_doctor(dir: &PathBuf) -> Result<()> {
         println!("  [ok] WebUI static files found at {}", static_dir.display());
     } else {
         println!(
-            "  [!!] WebUI 静态文件缺失（{}\\index.html）。将 webui 构建产物复制到该目录，或使用 --static-dir。",
-            static_dir.display()
+            "  [!!] WebUI 静态文件缺失（{}）。将 webui 构建产物复制到该目录，或使用 --static-dir。",
+            static_dir.join("index.html").display()
         );
     }
     Ok(())
