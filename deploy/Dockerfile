@@ -1,6 +1,7 @@
-# syntax=dockerfile/v1
 # pbh-rs 运行镜像：多阶段构建，最终基于 scratch（~15MB）
 # builder 阶段产出 musl 全静态二进制——scratch 无 libc，必须静态链接才能运行。
+# 注：不使用 '# syntax=' 指令（BuildKit 内置 frontend 已满足本文件全部特性；
+# 外置 frontend 需额外拉取 docker.io/dockerfile 镜像，在 CI 上有解析失败风险）。
 #
 # WebUI 静态资源：构建时从宿主 webui-dist/ 复制（获取方式见 README：
 # 上游 webui 源码构建，或从官方发行包 PeerBanHelper.jar 中提取 static/，
