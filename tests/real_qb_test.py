@@ -34,38 +34,72 @@ DATA = os.path.join(WORKSPACE, "target", "real-data")
 QB_WEB_PORT = int(os.environ.get("QB_WEB_PORT", "28180"))
 QB_WEB = f"http://127.0.0.1:{QB_WEB_PORT}/api/v2"
 QB_HOME = "/tmp/pbh-real-qbhome"
+QB_STDOUT = "/tmp/qb-stdout.log"
+QB_PASSWORD = "adminadmin"  # qB ≥4.6.1 首次启动生成临时密码，start_real_qb() 会更新此值
 QB_DOWNLOADS = "/tmp/pbh-real-qbdownloads"
 TOKEN = "real-test-token"
 PAYLOAD_DIR = QB_DOWNLOADS
 PAYLOAD = os.path.join(PAYLOAD_DIR, "pbh-real-test-payload.bin")
 
 
+def _parse_temp_password():
+    """qB ≥4.6.1 首次启动打印临时 WebUI 密码，从 stdout 日志解析"""
+    try:
+        import re
+        text = open(QB_STDOUT, errors="ignore").read()
+        m = re.search(r"temporary password is provided for this session:\s*(\S+)", text)
+        if m:
+            return m.group(1)
+        m = re.search(r"临时密码[^:：]*[:：]\s*(\S+)", text)
+        if m:
+            return m.group(1)
+    except OSError:
+        pass
+    return None
+
+
 def start_real_qb():
-    """启动独立的 qbittorrent-nox 实例（独立 HOME，测试自包含）"""
+    """启动独立的 qbittorrent-nox 实例（独立 HOME，测试自包含）。
+    兼容固定密码（≤4.6.0，adminadmin）与首次启动临时密码（≥4.6.1）。"""
+    global QB_PASSWORD
     shutil.rmtree(QB_HOME, ignore_errors=True)
     shutil.rmtree(QB_DOWNLOADS, ignore_errors=True)
     os.makedirs(QB_HOME, exist_ok=True)
     os.makedirs(QB_DOWNLOADS, exist_ok=True)
     env = dict(os.environ, HOME=QB_HOME, XDG_CONFIG_HOME=os.path.join(QB_HOME, ".config"),
                XDG_DATA_HOME=os.path.join(QB_HOME, ".local", "share"))
+    out = open(QB_STDOUT, "w")
     proc = subprocess.Popen(
         ["qbittorrent-nox", f"--webui-port={QB_WEB_PORT}"],
-        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    # 等待 WebUI 就绪
+        env=env, stdout=out, stderr=subprocess.STDOUT)
+
+    def try_login(pwd):
+        try:
+            with urllib.request.urlopen(
+                    f"http://127.0.0.1:{QB_WEB_PORT}/api/v2/auth/login",
+                    data=urllib.parse.urlencode(
+                        {"username": "admin", "password": pwd}).encode(),
+                    timeout=2) as r:
+                return r.read().decode().strip() == "Ok."
+        except Exception:
+            return None  # 未就绪
+
+    candidates = ["adminadmin"]
     for _ in range(60):
         time.sleep(0.5)
-        try:
-            with urllib.request.urlopen(f"http://127.0.0.1:{QB_WEB_PORT}/api/v2/auth/login",
-                                        data=urllib.parse.urlencode(
-                                            {"username": "admin", "password": "adminadmin"}).encode(),
-                                        timeout=2) as r:
-                if r.read().decode().strip() == "Ok.":
-                    break
-        except Exception:
-            continue
-    else:
-        raise RuntimeError("qbittorrent-nox did not come up")
-    return proc
+        for pwd in candidates:
+            ok = try_login(pwd)
+            if ok:
+                QB_PASSWORD = pwd
+                return proc
+            if ok is None:
+                break  # WebUI 未就绪，等下一轮
+        # WebUI 已就绪但密码不对 → 解析临时密码
+        tmp = _parse_temp_password()
+        if tmp and tmp not in candidates:
+            candidates.insert(0, tmp)
+    raise RuntimeError("qbittorrent-nox did not come up (login failed); stdout tail: " +
+                       open(QB_STDOUT, errors="ignore").read()[-400:])
 
 GOOD_PEER_ID = b"-qB4520-realtest0001"
 BAD_PEER_ID = b"-HP0001xunleivariant"
@@ -106,7 +140,7 @@ class QB:
 
     def login(self):
         s, b = self.call("/auth/login", urllib.parse.urlencode(
-            {"username": "admin", "password": "adminadmin"}).encode())
+            {"username": "admin", "password": QB_PASSWORD}).encode())
         assert b.decode().strip() == "Ok.", f"qB login failed: {b!r}"
 
     def prefs(self):
