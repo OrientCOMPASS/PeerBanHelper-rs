@@ -8,12 +8,14 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
 
 WORKSPACE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PBH_BIN = os.environ.get("PBH_BIN", os.path.join(WORKSPACE, "target", "debug", "pbh"))
+LOG_PATH = os.path.join(tempfile.gettempdir(), "pbh-api.log")
 DATA = os.path.join(WORKSPACE, "target", "api-data")
 FAKE_PORT = 18090
 PBH_PORT = 29897
@@ -55,6 +57,8 @@ def wait_for(cond, timeout, interval=0.4):
     return None
 
 def kill_orphans():
+    if not os.path.isdir("/proc"):
+        return  # non-Linux (CI windows): nothing to sweep
     for pid in os.listdir("/proc"):
         if not pid.isdigit():
             continue
@@ -81,7 +85,7 @@ def main():
 
     fakeqb = subprocess.Popen([sys.executable, os.path.join(WORKSPACE, "tests", "fakeqb.py"), str(FAKE_PORT)],
                               stdout=subprocess.DEVNULL)
-    logf = open("/tmp/pbh-api.log", "w")
+    logf = open(LOG_PATH, "w")
     pbh = subprocess.Popen([PBH_BIN, "run", "--data-dir", DATA, "--port", str(PBH_PORT)],
                            stdout=logf, stderr=subprocess.STDOUT)
     base = f"http://127.0.0.1:{PBH_PORT}"
@@ -239,7 +243,7 @@ def main():
 
     if failures:
         print(f"\n{RED}{len(failures)} failed:{RESET} " + "; ".join(failures))
-        print(open("/tmp/pbh-api.log").read()[-2000:])
+        print(open(LOG_PATH).read()[-2000:])
         sys.exit(1)
     print(f"\n{GREEN}API TEST: ALL CHECKS PASSED{RESET}")
 

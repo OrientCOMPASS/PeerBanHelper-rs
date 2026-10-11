@@ -10,12 +10,14 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
 
 WORKSPACE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PBH_BIN = os.environ.get("PBH_BIN", os.path.join(WORKSPACE, "target", "debug", "pbh"))
+LOG_PATH = os.path.join(tempfile.gettempdir(), "pbh-geoiprule.log")
 DATA = os.path.join(WORKSPACE, "target", "geoiprule-data")
 MMDB_SRC = os.path.join(WORKSPACE, "target", "geoip-data", "ipdb")
 FAKE_PORT = 18095
@@ -104,7 +106,7 @@ client:
     http_call(f"http://127.0.0.1:{FAKE_PORT}/control/setpeers", "POST",
               data=json.dumps(peers).encode(), headers={"Content-Type": "application/json"})
 
-    logf = open("/tmp/pbh-geoiprule.log", "w")
+    logf = open(LOG_PATH, "w")
     pbh = subprocess.Popen([PBH_BIN, "run", "--data-dir", DATA, "--port", str(PBH_PORT)],
                            stdout=logf, stderr=subprocess.STDOUT)
     auth = {"Authorization": f"Bearer {TOKEN}"}
@@ -145,7 +147,7 @@ client:
 
     if failures:
         print(f"\n{RED}{len(failures)} failed:{RESET} " + "; ".join(failures))
-        print(open("/tmp/pbh-geoiprule.log", errors="ignore").read()[-1500:])
+        print(open(LOG_PATH, errors="ignore").read()[-1500:])
         sys.exit(1)
     print(f"\n{GREEN}GEOIP RULE TEST: ALL CHECKS PASSED{RESET}")
 

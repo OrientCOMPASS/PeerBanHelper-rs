@@ -11,6 +11,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -19,6 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 WORKSPACE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PBH_BIN = os.environ.get("PBH_BIN", os.path.join(WORKSPACE, "target", "debug", "pbh"))
+LOG_PATH = os.path.join(tempfile.gettempdir(), "pbh-adapters.log")
 DATA = os.path.join(WORKSPACE, "target", "adapters-data")
 BT_PORT = 18101   # biglybt fake
 A2_PORT = 18102   # aria2 fake
@@ -222,7 +224,7 @@ client:
     threading.Thread(target=bt_srv.serve_forever, daemon=True).start()
     threading.Thread(target=a2_srv.serve_forever, daemon=True).start()
 
-    logf = open("/tmp/pbh-adapters.log", "w")
+    logf = open(LOG_PATH, "w")
     pbh = subprocess.Popen([PBH_BIN, "run", "--data-dir", DATA, "--port", str(PBH_PORT)],
                            stdout=logf, stderr=subprocess.STDOUT)
     db_path = os.path.join(DATA, "db", "peerbanhelper.db")
@@ -283,7 +285,7 @@ client:
 
     if failures:
         print(f"\n{RED}{len(failures)} failed:{RESET} " + "; ".join(failures))
-        print(open("/tmp/pbh-adapters.log", errors="ignore").read()[-2500:])
+        print(open(LOG_PATH, errors="ignore").read()[-2500:])
         sys.exit(1)
     print(f"\n{GREEN}ADAPTERS TEST: ALL CHECKS PASSED{RESET}")
 
