@@ -1,4 +1,4 @@
-# pbh-rs 运行镜像：多阶段构建，最终基于 scratch（~15MB）
+# pbh-rs 运行镜像：多阶段构建，最终基于 scratch（~36MB，含 WebUI 静态资源）
 # builder 阶段产出 musl 全静态二进制——scratch 无 libc，必须静态链接才能运行。
 # 注：不使用 '# syntax=' 指令（BuildKit 内置 frontend 已满足本文件全部特性；
 # 外置 frontend 需额外拉取 docker.io/dockerfile 镜像，在 CI 上有解析失败风险）。

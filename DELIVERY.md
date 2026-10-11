@@ -14,7 +14,7 @@
 | Windows x86_64 可执行 | Release `pbh-windows-x86_64.exe` | 控制台程序；可用 `sc create` / NSSM 注册为服务 |
 | WebUI 静态资源 | Release `pbh-webui-v9.5.1.zip` | 上游官方 v9.5.1 WebUI（零改动兼容），解压到 `<data>/static/` |
 | 校验和 | Release `SHA256SUMS.txt` | `sha256sum -c` 验证 |
-| Docker | `deploy/Dockerfile` | scratch 运行镜像（~15MB），CI 不推送 registry，可自行 `docker build` |
+| Docker | `deploy/Dockerfile` | scratch 运行镜像（~36MB 含 WebUI；musl 全静态二进制），CI 不推送 registry，可自行 `docker build`；release 流水线已做容器级冒烟验证 |
 | systemd | `deploy/pbh.service` | 含资源限制与安全加固 |
 | 文档 | `README.md`、`docs/compatibility.md` | 架构、迁移、兼容性矩阵 |
 | 测试 | `tests/`（10 套） | 含两套真机下载器 e2e；CI 每次 push 全量执行 |
@@ -29,15 +29,23 @@
   - **windows-latest**：cargo build + 单元测试 → 同 8 套 fake-downloader 集成测试
     （测试套件已做跨平台化：临时日志走 `tempfile.gettempdir()`、`/proc` 孤儿清扫仅 Linux 生效）
 - Release 流水线：完整 CI 门禁全绿 → 构建 musl 静态 Linux 与 Windows MSVC release 二进制 →
-  **在每个目标平台用实际发布工件再跑一遍 smoke 套件（26 项）自检** → 提取打包上游 WebUI →
-  SHA256（三资产、纯文件名）→ 发布/更新 Release
+  **在每个目标平台用实际发布工件再跑一遍 smoke 套件（26 项）自检** → 构建 Docker scratch
+  镜像并做容器级冒烟（version / API 就绪 / WebUI index / `docker stop` SIGTERM 优雅停机
+  Goodbye，实测 4.1s）→ 提取打包上游 WebUI → SHA256（三资产、纯文件名）→ 发布 Release
+- **v0.1.0 发布 run（当前 Release 资产的构建来源）**：
+  [#38139729287](https://github.com/OrientCOMPASS/PeerBanHelper-rs/actions/runs/38139729287)
+  @ tag `v0.1.0`→`8808ae5`（annotated tag，tagger OrientCOMPASS），6/6 job 全绿，
+  全程约 13 分钟；发布资产时间戳 2026-10-11T12:43:53Z
 - 历史节点：首次 CI 全绿 run
   [#38129052232](https://github.com/OrientCOMPASS/PeerBanHelper-rs/actions/runs/38129052232)
   @ `5992076`（2026-10-11）；期间修复 qB ≥4.6.1 首启临时密码兼容（测试侧）与
   `DELETE /api/bans` count 语义（产品侧，对齐上游）
-- **发布工件沙盒复核（本会话，v0.1.0 资产）**：SHA256 三资产全匹配；musl release 二进制
-  直接跑通全部 8 套 fake-downloader 集成测试（smoke 26 项、api 33 项、batch_a 36 项、
-  modules、pcb、rule_sub、adapters、geoip 全 PASS）+ version/doctor 装机冒烟
+- **发布工件沙盒复核（本会话，重建后的 v0.1.0 资产）**：SHA256 三资产全匹配、sums 为纯
+  文件名全覆盖；WebUI zip 232 条目（index.html+LICENSE，testzip OK）；musl 二进制与本地
+  已通过全部 8 套 fake-downloader 集成测试（smoke 26 / api 33 / batch_a 36 / modules /
+  pcb / rule_sub / adapters / geoip 全 PASS，geoip 用真实 ASN mmdb）的工件**字节一致**，
+  并对重新下载的资产复跑 smoke+api 全 PASS；version/doctor/run 冷启动、SIGTERM 优雅停机
+  （Goodbye）、空数据目录自举（config/db/ipdb/logs/static/sub 自动创建）实测通过
 - 注意（上游 quirk，bug-compat 保留）：未知 `/api/*` 路由返回 **405**（上游
   `EndpointNotFound→METHOD_NOT_ALLOWED`），并非 404
 
@@ -95,12 +103,14 @@
 
 ```bash
 git clone https://github.com/OrientCOMPASS/PeerBanHelper-rs && cd PeerBanHelper-rs
-curl -sSL -o /tmp/pbh.zip https://github.com/PBH-BTN/PeerBanHelper/releases/download/v9.5.1/PeerBanHelper_9.5.1.zip
-# 提取 jar 内 static/ 到 webui-dist/（或用 Release 的 pbh-webui zip 解压为 webui-dist/）
+# WebUI 静态资源：直接把 Release 的 pbh-webui-v9.5.1.zip 解压为 webui-dist/
+mkdir -p webui-dist && unzip -q /path/to/pbh-webui-v9.5.1.zip -d webui-dist
 docker build -f deploy/Dockerfile -t pbh-rs .
-docker run -d --name pbh --network host -v pbh-data:/data -p 9898:9898 pbh-rs
+docker run -d --name pbh --network host -v pbh-data:/data pbh-rs
 ```
-注意：与上游一致，**必须 host 网络**（需要看到 Peer 真实 IP）。
+注意：与上游一致，**必须 host 网络**（需要看到 Peer 真实 IP；host 网络下无需 `-p`）。
+镜像为 scratch + musl 全静态二进制（~36MB 含 WebUI）；release 流水线已验证：
+容器内 `version`、冷启动 API 就绪、`/index.html` 200、`docker stop` SIGTERM 优雅停机。
 
 ### 3.6 建议的重点观察项（一周）
 

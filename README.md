@@ -124,7 +124,8 @@ BanWave + 每下载器顺序 torrent 迭代 + 模块同步判定）；GeoIP 下�
 
 ## 部署
 
-- `deploy/Dockerfile`：多阶段构建 → scratch 运行镜像（~15MB）
+- `deploy/Dockerfile`：多阶段构建（builder 产出 musl 全静态二进制）→ scratch 运行镜像
+  （~36MB，含 WebUI 静态资源；release 流水线内含该镜像的构建与容器级冒烟验证）
 - `deploy/pbh.service`：systemd 单元
 - Windows：`pbh.exe run` 可直接注册为服务（sc create / NSSM），SIGTERM 语义对应服务停止
 
