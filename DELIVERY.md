@@ -21,19 +21,23 @@
 
 ## 2. CI 验证状态
 
-- 工作流：`.github/workflows/ci.yml`（push/PR 触发）、`release.yml`（tag `v*` 触发）
-- CI 内容：cargo build + 单元测试（16 passing）→ 8 套 fake-downloader 集成测试 →
-  **真机 qbittorrent-nox 4.6.2 与真机 transmission-daemon 4.0.5 两套 e2e**（GitHub
-  ubuntu-24.04 runner，raw BT 协议假 Peer 驱动）→ Windows 编译 parity 检查
-- **首次全绿**：run [#38129052232](https://github.com/OrientCOMPASS/PeerBanHelper-rs/actions/runs/38129052232)
-  @ `5992076`（2026-10-11）——两 job 全部 success，无任何 FAIL 断言
-- CI 期间修复：qB ≥4.6.1 首启临时密码兼容（测试侧）；`DELETE /api/bans` 的 count
-  改为实际移除数（产品侧，对齐上游语义）
-- Release 内容：musl 静态 Linux 二进制 + Windows 二进制 + 上游 WebUI 提取打包 + SHA256 + 发布说明
-- **发布资产已在沙盒实机复核**：SHA256 全匹配；musl 二进制完成 15 项装机冒烟
-  （冷启动 0.25s 就绪 / WebUI index 服务 / token 鉴权正反向 / status·manifest·bans·
-  downloaders 端点 / 未知路由返回上游同款 405+WEBAPI_ROUTE_NOT_EXISTS / SIGTERM 优雅
-  停机 Goodbye+退出码 0 / 重启恢复+token 持久）；WebUI zip 232 条目含 index.html+LICENSE
+- 工作流：`.github/workflows/ci.yml`（push/PR 触发；`workflow_call` 可复用）、
+  `release.yml`（tag `v*` 触发，先调用完整 CI 作为门禁）
+- CI 内容（两个目标平台）：
+  - **ubuntu-24.04**：cargo build + 单元测试 → 8 套 fake-downloader 集成测试 →
+    **真机 qbittorrent-nox 与真机 transmission-daemon 两套 e2e**（raw BT 协议假 Peer 驱动）
+  - **windows-latest**：cargo build + 单元测试 → 同 8 套 fake-downloader 集成测试
+    （测试套件已做跨平台化：临时日志走 `tempfile.gettempdir()`、`/proc` 孤儿清扫仅 Linux 生效）
+- Release 流水线：完整 CI 门禁全绿 → 构建 musl 静态 Linux 与 Windows MSVC release 二进制 →
+  **在每个目标平台用实际发布工件再跑一遍 smoke 套件（26 项）自检** → 提取打包上游 WebUI →
+  SHA256（三资产、纯文件名）→ 发布/更新 Release
+- 历史节点：首次 CI 全绿 run
+  [#38129052232](https://github.com/OrientCOMPASS/PeerBanHelper-rs/actions/runs/38129052232)
+  @ `5992076`（2026-10-11）；期间修复 qB ≥4.6.1 首启临时密码兼容（测试侧）与
+  `DELETE /api/bans` count 语义（产品侧，对齐上游）
+- **发布工件沙盒复核（本会话，v0.1.0 资产）**：SHA256 三资产全匹配；musl release 二进制
+  直接跑通全部 8 套 fake-downloader 集成测试（smoke 26 项、api 33 项、batch_a 36 项、
+  modules、pcb、rule_sub、adapters、geoip 全 PASS）+ version/doctor 装机冒烟
 - 注意（上游 quirk，bug-compat 保留）：未知 `/api/*` 路由返回 **405**（上游
   `EndpointNotFound→METHOD_NOT_ALLOWED`），并非 404
 
@@ -78,9 +82,14 @@
 ### 3.4 Windows
 
 1. `pbh-windows-x86_64.exe version` / `doctor --data-dir .\data` / `run`
-2. 服务化：`sc create pbh binPath= "C:\pbh\pbh-windows-x86_64.exe run --data-dir C:\pbh\data"`
-   → `sc start pbh`；`sc stop pbh` 验证优雅停机
-3. WebUI/OOBE 同 3.1
+   （首次运行若 Windows 防火墙弹窗 → 允许访问；控制台 Ctrl+C 应优雅停机打印 `Goodbye.`）
+2. 解压 `pbh-webui-v9.5.1.zip` 到 `data\static\` → 浏览器打开 `http://127.0.0.1:9898`
+   走 OOBE，其余同 3.1
+3. 服务化（推荐 NSSM/WinSW 包装）：
+   `nssm install pbh C:\pbh\pbh-windows-x86_64.exe "run --data-dir C:\pbh\data"`
+   → `nssm start pbh` / `nssm stop pbh` 验证启停
+   - 注意：裸控制台程序直接 `sc create`/`sc start` 会报 1053（pbh 未实现 SCM 服务握手，
+     与上游 Java 版行为一致），须配合 NSSM/WinSW 之类包装器注册服务
 
 ### 3.5 Docker（可选）
 

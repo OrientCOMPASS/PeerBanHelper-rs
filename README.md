@@ -89,6 +89,12 @@ python3 tests/real_tr_test.py               # ★ 真机 transmission-daemon 3.0
 PBH_BIN=target/release/pbh python3 tests/...  # 以 release 二进制跑任意套件
 ```
 
+CI（`.github/workflows/ci.yml`，可复用）在**两个目标平台**执行：ubuntu-24.04 上跑
+单元测试 + 全部 8 套 fake-downloader 套件 + 真机 qbittorrent-nox/transmission-daemon
+两套 e2e；windows-latest 上跑单元测试 + 同 8 套 fake-downloader 套件。
+Release 工作流（tag `v*`）先以完整 CI 为门禁，构建各平台 release 二进制后，
+**在目标平台用实际发布工件再跑一遍 smoke 套件自检**，通过后才打包 WebUI/SHA256 并发布。
+
 真机测试自管理下载器实例（独立 HOME/端口），使用原始 BitTorrent 协议假 Peer
 （真实握手 + 分块请求）驱动封禁判定，并验证下载器侧实际生效（连接被断开/拒绝、
 blocklist 收敛、解封后恢复）。
